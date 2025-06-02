@@ -53,7 +53,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-class SnapLogServer:
+class SnapLogServer: 
     def __init__(self, master):
         self.master = master
         master.title("SnapLog Server Dashboard")
@@ -200,6 +200,10 @@ class SnapLogServer:
         self.save_server_button = ttk.Button(self.server_settings_frame, text="Save Server Settings", command=self._save_server_config)
         self.save_server_button.grid(row=3, column=0, columnspan=2, pady=10) # Adjusted row for new fields
         self.server_settings_frame.grid_columnconfigure(1, weight=1)
+
+        # New: Manual Conversion Button
+        self.manual_conversion_button = ttk.Button(self.server_settings_frame, text="Run Conversion Now", command=self._manual_run_conversion)
+        self.manual_conversion_button.grid(row=4, column=0, columnspan=2, pady=5) # Placed below save button
 
         # Initial state of server conversion value entry
         self._toggle_server_conversion_value_entry()
@@ -611,6 +615,26 @@ class SnapLogServer:
                 self.conversion_status_label.config(text=f"Conversion Status: Last run at {datetime.now().strftime('%H:%M:%S')}")
             
             time.sleep(1) # Check every second
+
+    def _manual_run_conversion(self):
+        """Triggers a manual conversion process in a separate thread."""
+        if messagebox.askyesno("Confirm Manual Conversion", "Are you sure you want to run conversion now?"):
+            logger.info("[*] Manual conversion triggered by user.")
+            self.conversion_status_label.config(text="Conversion Status: Manual run initiated...")
+            self.master.update_idletasks() # Update GUI immediately
+
+            # Run conversion in a separate thread to keep GUI responsive
+            manual_thread = threading.Thread(target=self._run_conversions_threaded, daemon=True)
+            manual_thread.start()
+
+    def _run_conversions_threaded(self):
+        """Wrapper to run conversions and update status after completion."""
+        try:
+            self._run_conversions()
+        finally:
+            self.master.after(0, lambda: self.conversion_status_label.config(text=f"Conversion Status: Manual run completed at {datetime.now().strftime('%H:%M:%S')}"))
+            logger.info("[*] Manual conversion process finished.")
+
 
     def _run_conversions(self):
         """Performs the actual conversion of .binn files to .png for all clients."""
