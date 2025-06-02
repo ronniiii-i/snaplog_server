@@ -1,4 +1,3 @@
-
 import tkinter as tk
 from tkinter import ttk, messagebox
 import os
@@ -13,9 +12,9 @@ import queue # For thread-safe logging
 
 # Import server-specific configuration
 from server_config import (
-    NETWORK_BASE_PATH, CLIENT_CONFIG_FILE,
+    NETWORK_BASE_PATH, NETWORK_CONVERTED_PATH, CLIENT_CONFIG_FILE,
     load_server_config, save_server_config,
-    DEFAULT_SERVER_CONVERSION_TIME
+    DEFAULT_SERVER_CONVERSION_TYPE, DEFAULT_SERVER_CONVERSION_VALUE
 )
 
 # --- Custom Logging Handler for GUI ---
@@ -64,7 +63,8 @@ class SnapLogServer:
         self.server_config = load_server_config() # Load server's own config (includes aliases)
         self.conversion_thread = None
         self.stop_conversion_event = threading.Event()
-        self.last_conversion_check = None # To prevent multiple conversions in the same minute
+        self.last_daily_conversion_check = None # To prevent multiple daily conversions within the same minute
+        self.last_periodic_conversion_time = None # To track last periodic conversion time
 
         self._create_widgets()
         # Set up GUI logging handler AFTER widgets are created
@@ -183,14 +183,27 @@ class SnapLogServer:
         self.server_settings_frame = ttk.LabelFrame(self.right_frame, text="Server Conversion Settings")
         self.server_settings_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        ttk.Label(self.server_settings_frame, text="Conversion Time (HH:MM):").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
-        self.server_conversion_time_var = tk.StringVar(value=self.server_config["conversion_time"])
-        self.server_conversion_time_entry = ttk.Entry(self.server_settings_frame, textvariable=self.server_conversion_time_var)
-        self.server_conversion_time_entry.grid(row=0, column=1, sticky=tk.EW, padx=5, pady=2)
+        # Conversion Type (Daily/Periodic)
+        ttk.Label(self.server_settings_frame, text="Conversion Type:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
+        self.server_conversion_type_var = tk.StringVar(value=self.server_config["conversion_type"])
+        self.server_conversion_daily_radio = ttk.Radiobutton(self.server_settings_frame, text="Daily (HH:MM)", variable=self.server_conversion_type_var, value="daily", command=self._toggle_server_conversion_value_entry)
+        self.server_conversion_periodic_radio = ttk.Radiobutton(self.server_settings_frame, text="Periodic (seconds)", variable=self.server_conversion_type_var, value="periodic", command=self._toggle_server_conversion_value_entry)
+        self.server_conversion_daily_radio.grid(row=0, column=1, sticky=tk.W, padx=5, pady=2)
+        self.server_conversion_periodic_radio.grid(row=1, column=1, sticky=tk.W, padx=5, pady=2)
+
+        # Conversion Value
+        ttk.Label(self.server_settings_frame, text="Conversion Value:").grid(row=2, column=0, sticky=tk.W, padx=5, pady=2)
+        self.server_conversion_value_var = tk.StringVar(value=self.server_config["conversion_value"])
+        self.server_conversion_value_entry = ttk.Entry(self.server_settings_frame, textvariable=self.server_conversion_value_var)
+        self.server_conversion_value_entry.grid(row=2, column=1, sticky=tk.EW, padx=5, pady=2)
 
         self.save_server_button = ttk.Button(self.server_settings_frame, text="Save Server Settings", command=self._save_server_config)
-        self.save_server_button.grid(row=1, column=0, columnspan=2, pady=10)
+        self.save_server_button.grid(row=3, column=0, columnspan=2, pady=10) # Adjusted row for new fields
         self.server_settings_frame.grid_columnconfigure(1, weight=1)
+
+        # Initial state of server conversion value entry
+        self._toggle_server_conversion_value_entry()
+
 
         # Log Display Area
         self.log_frame = ttk.LabelFrame(self.master, text="Server Log")
@@ -201,7 +214,7 @@ class SnapLogServer:
         self.log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
         self.log_text_widget['yscrollcommand'] = self.log_scrollbar.set
 
-        # Initial state of upload value entry
+        # Initial state of client upload value entry
         self._toggle_upload_value_entry()
 
     def _toggle_upload_value_entry(self):
@@ -217,6 +230,13 @@ class SnapLogServer:
             self.apply_all_upload_value_entry.config(state=tk.NORMAL)
         else: # periodic
             self.apply_all_upload_value_entry.config(state=tk.NORMAL)
+
+    def _toggle_server_conversion_value_entry(self):
+        """Enables/disables and updates placeholder for server conversion_value_entry."""
+        if self.server_conversion_type_var.get() == "daily":
+            self.server_conversion_value_entry.config(state=tk.NORMAL)
+        else: # periodic
+            self.server_conversion_value_entry.config(state=tk.NORMAL)
 
     def _load_all_client_configs(self):
         """Loads all client configurations from the central JSON file and server aliases."""
@@ -484,20 +504,31 @@ class SnapLogServer:
         return found_clients
 
     def _save_server_config(self):
-        """Saves the server's conversion time setting."""
+        """Saves the server's conversion type and value settings."""
         try:
-            conversion_time = self.server_conversion_time_var.get()
-            # Validate HH:MM format
-            datetime.strptime(conversion_time, "%H:%M")
+            conversion_type = self.server_conversion_type_var.get()
+            conversion_value = self.server_conversion_value_var.get()
 
-            self.server_config["conversion_time"] = conversion_time
+            if conversion_type == "daily":
+                # Validate HH:MM format
+                datetime.strptime(conversion_value, "%H:%M")
+            elif conversion_type == "periodic":
+                # Validate as integer seconds
+                conversion_value = int(conversion_value)
+                if conversion_value <= 0:
+                    raise ValueError("Periodic conversion value (seconds) must be a positive integer.")
+            else:
+                raise ValueError("Invalid conversion type selected.")
+
+            self.server_config["conversion_type"] = conversion_type
+            self.server_config["conversion_value"] = conversion_value
             save_server_config(self.server_config)
-            messagebox.showinfo("Success", "Server conversion time saved.")
-            logger.info(f"Server conversion time updated to: {conversion_time}")
-            self._start_conversion_scheduler() # Restart scheduler with new time
-        except ValueError:
-            messagebox.showerror("Validation Error", "Conversion time must be in HH:MM format (e.g., 02:00).")
-            logger.error(f"Validation error saving server config: Invalid time format '{conversion_time}'")
+            messagebox.showinfo("Success", "Server conversion settings saved.")
+            logger.info(f"Server conversion settings updated to: Type={conversion_type}, Value={conversion_value}")
+            self._start_conversion_scheduler() # Restart scheduler with new settings
+        except ValueError as ve:
+            messagebox.showerror("Validation Error", str(ve))
+            logger.error(f"Validation error saving server config: {ve}")
         except Exception as e:
             messagebox.showerror("Error", f"An unexpected error occurred: {e}")
             logger.error(f"Unexpected error saving server config: {e}", exc_info=True)
@@ -519,27 +550,66 @@ class SnapLogServer:
 
         self.conversion_thread = threading.Thread(target=self._conversion_scheduler_loop, daemon=True)
         self.conversion_thread.start()
-        logger.info(f"Started conversion scheduler for {self.server_config['conversion_time']}.")
-        self.conversion_status_label.config(text=f"Conversion Status: Scheduled for {self.server_config['conversion_time']}")
+        
+        status_text = f"Conversion Status: Scheduled for {self.server_config['conversion_type']} ({self.server_config['conversion_value']})"
+        self.conversion_status_label.config(text=status_text)
+        logger.info(f"Started conversion scheduler: {status_text}.")
 
     def _conversion_scheduler_loop(self):
-        """Background loop to trigger conversion at the scheduled time."""
+        """Background loop to trigger conversion based on scheduled type (daily or periodic)."""
         while not self.stop_conversion_event.is_set():
+            # Reload server config to pick up changes dynamically
+            self.server_config = load_server_config()
+            conversion_type = self.server_config["conversion_type"]
+            conversion_value = self.server_config["conversion_value"]
+            
             now = datetime.now()
-            target_time_str = self.server_config["conversion_time"]
-            current_time_str = now.strftime("%H:%M")
+            should_run_conversion = False
 
-            if current_time_str == target_time_str and current_time_str != self.last_conversion_check:
-                logger.info(f"[*] Conversion time {target_time_str} reached. Starting conversion...")
+            if conversion_type == "daily":
+                target_time_str = str(conversion_value) # Ensure it's a string like "HH:MM"
+                current_time_str = now.strftime("%H:%M")
+                
+                if current_time_str == target_time_str and current_time_str != self.last_daily_conversion_check:
+                    should_run_conversion = True
+                    self.last_daily_conversion_check = current_time_str # Mark as checked for this minute
+                elif current_time_str != self.last_daily_conversion_check:
+                    # Reset last_daily_conversion_check if the minute changes, so it can trigger again next day
+                    self.last_daily_conversion_check = None 
+                
+                # Reset periodic tracker if switching to daily
+                self.last_periodic_conversion_time = None
+
+            elif conversion_type == "periodic":
+                try:
+                    interval_seconds = int(conversion_value)
+                    if self.last_periodic_conversion_time is None:
+                        # First run, or after service restart, run immediately
+                        should_run_conversion = True
+                        self.last_periodic_conversion_time = now
+                    elif (now - self.last_periodic_conversion_time).total_seconds() >= interval_seconds:
+                        should_run_conversion = True
+                        self.last_periodic_conversion_time = now
+                except ValueError:
+                    logger.error(f"Invalid periodic conversion value: {conversion_value}. Expected seconds (integer).")
+                    # Log error but continue loop, perhaps with a default delay
+                    time.sleep(60)
+                    continue # Skip current check, wait for next loop iteration
+                
+                # Reset daily tracker if switching to periodic
+                self.last_daily_conversion_check = None
+
+            else:
+                logger.warning(f"Unknown conversion type: {conversion_type}. Skipping conversion check.")
+
+            if should_run_conversion:
+                logger.info("\n" + "="*50)
+                logger.info(f"[*] Server conversion triggered ({conversion_type} schedule).")
                 self.conversion_status_label.config(text="Conversion Status: Running...")
                 self.master.update_idletasks() # Update GUI immediately
                 self._run_conversions()
-                self.last_conversion_check = current_time_str # Mark as checked for this minute
                 self.conversion_status_label.config(text=f"Conversion Status: Last run at {datetime.now().strftime('%H:%M:%S')}")
-            elif current_time_str != self.last_conversion_check:
-                # Reset last_conversion_check if the minute changes, so it can trigger again next day
-                self.last_conversion_check = None
-
+            
             time.sleep(1) # Check every second
 
     def _run_conversions(self):
@@ -555,8 +625,8 @@ class SnapLogServer:
             # Iterate through all client directories
             for device_id_dir in self._get_found_client_dirs(): # Use helper to get valid client dirs
                 client_base_path = os.path.join(NETWORK_BASE_PATH, device_id_dir)
-                raw_path = os.path.join(client_base_path, "raw")
-                converted_path = os.path.join(client_base_path, "converted")
+                raw_path = os.path.join(client_base_path)
+                converted_path = os.path.join(NETWORK_CONVERTED_PATH, device_id_dir)
 
                 if not os.path.isdir(raw_path):
                     logger.warning(f"Raw directory not found for {device_id_dir}: {raw_path}. Skipping.")
@@ -641,4 +711,3 @@ if __name__ == "__main__":
     root = tk.Tk()
     app = SnapLogServer(root)
     root.mainloop()
-

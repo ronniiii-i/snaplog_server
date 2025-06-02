@@ -1,5 +1,6 @@
 {
-    "conversion_time": "11:35",
+    "conversion_type": "periodic",
+    "conversion_value": 300,
     "client_aliases": {
         "Genadmin@GN128ML1029": "Roni"
     }

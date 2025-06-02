@@ -7,27 +7,32 @@ import json
 
 # This MUST match the NETWORK_BASE_PATH set in the client's src/config.py
 NETWORK_BASE_PATH = "C:/snaplog_data/" # Example: Adjust this to your actual shared network path
+NETWORK_CONVERTED_PATH = "C:/converted_snaplog_data/" # Example: Adjust this to your actual shared network 
 
 # Path to the central configuration file for all clients
 CLIENT_CONFIG_FILE = os.path.join(NETWORK_BASE_PATH, "client_configs.json")
 
-# Path to the server's own configuration file (for conversion time and aliases)
+# Path to the server's own configuration file (for conversion time, type, and aliases)
 SERVER_LOCAL_CONFIG_FILE = "server_config.json"
 
-# Default server conversion time
-DEFAULT_SERVER_CONVERSION_TIME = "02:00" # HH:MM
+# Default server conversion settings
+DEFAULT_SERVER_CONVERSION_TYPE = "daily" # New: "daily" or "periodic"
+DEFAULT_SERVER_CONVERSION_VALUE = "17:00" # HH:MM for daily, seconds for periodic (e.g., 3600 for 1 hour)
 
 def load_server_config():
-    """Loads server-specific configuration (e.g., conversion time, client aliases)."""
+    """Loads server-specific configuration (e.g., conversion time, type, client aliases)."""
     config = {
-        "conversion_time": DEFAULT_SERVER_CONVERSION_TIME,
-        "client_aliases": {} # New: Dictionary to store device_id -> alias mappings
+        "conversion_type": DEFAULT_SERVER_CONVERSION_TYPE, # New
+        "conversion_value": DEFAULT_SERVER_CONVERSION_VALUE, # Renamed from conversion_time
+        "client_aliases": {}
     }
     try:
         if os.path.exists(SERVER_LOCAL_CONFIG_FILE):
             with open(SERVER_LOCAL_CONFIG_FILE, 'r') as f:
                 loaded_config = json.load(f)
-                config["conversion_time"] = loaded_config.get("conversion_time", DEFAULT_SERVER_CONVERSION_TIME)
+                # Load new fields, providing defaults for backward compatibility
+                config["conversion_type"] = loaded_config.get("conversion_type", DEFAULT_SERVER_CONVERSION_TYPE)
+                config["conversion_value"] = loaded_config.get("conversion_value", DEFAULT_SERVER_CONVERSION_VALUE)
                 config["client_aliases"] = loaded_config.get("client_aliases", {})
                 print(f"[SERVER_CONFIG] Loaded server configuration: {config}")
         else:
