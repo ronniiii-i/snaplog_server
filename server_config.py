@@ -1,19 +1,28 @@
 import os
 import json
+import sys
 
 # ====================================================================
 # Server-specific paths and settings
 # ====================================================================
 
 # This MUST match the NETWORK_BASE_PATH set in the client's src/config.py
-NETWORK_BASE_PATH = "C:/snaplog_data/" # Example: Adjust this to your actual shared network path
-NETWORK_CONVERTED_PATH = "C:/converted_snaplog_data/" # Example: Adjust this to your actual shared network 
+NETWORK_BASE_PATH = "E:/Binn/" # Example: Adjust this to your actual shared network path
+NETWORK_CONVERTED_PATH = "E:/Binn2/" # Example: Adjust this to your actual shared network 
 
 # Path to the central configuration file for all clients
 CLIENT_CONFIG_FILE = os.path.join(NETWORK_BASE_PATH, "client_configs.json")
 
+# Get the directory where the executable is located
+if getattr(sys, 'frozen', False): # True if running as a PyInstaller bundle
+    application_path = os.path.dirname(sys.executable)
+else:
+    application_path = os.path.dirname(os.path.abspath(__file__))
+
 # Path to the server's own configuration file (for conversion time, type, and aliases)
-SERVER_LOCAL_CONFIG_FILE = "server_config.json"
+SERVER_LOCAL_CONFIG_FILE = os.path.join(application_path, 'server_config.json')
+
+# SERVER_LOCAL_CONFIG_FILE = "server_config.json"
 
 # Default server conversion settings
 DEFAULT_SERVER_CONVERSION_TYPE = "daily" # New: "daily" or "periodic"
