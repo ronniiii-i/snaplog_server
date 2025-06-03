@@ -57,46 +57,47 @@ class SnapLogServer:
     def __init__(self, master):
         self.master = master
         master.title("SnapLog Server Dashboard")
-        master.geometry("1000x750") # Increased size for log display
+        master.geometry("1000x750")
 
-        self.client_configs = {} # Stores all client configurations
-        self.server_config = load_server_config() # Load server's own config (includes aliases)
+        self.client_configs = {}
+        self.server_config = load_server_config()
         self.conversion_thread = None
         self.stop_conversion_event = threading.Event()
-        self.last_daily_conversion_check = None # To prevent multiple daily conversions within the same minute
-        self.last_periodic_conversion_time = None # To track last periodic conversion time
+        self.last_daily_conversion_check = None
+        self.last_periodic_conversion_time = None
 
         self._create_widgets()
-        # Set up GUI logging handler AFTER widgets are created
         self.log_handler = TextHandler(self.log_text_widget)
         self.log_handler.setFormatter(logging.Formatter('%(asctime)s - %(levelname)s - %(message)s'))
         logger.addHandler(self.log_handler)
         logger.info("SnapLog Server GUI started.")
 
-        self._load_all_client_configs() # This will now load aliases too
+        self._load_all_client_configs()
         self._populate_client_list()
         self._start_conversion_scheduler()
+        self._refresh_data()
 
-        # Periodically refresh client list and configs
-        self.master.after(60000, self._refresh_data) # Refresh every minute
 
         # Handle window close event
         self.master.protocol("WM_DELETE_WINDOW", self._on_closing)
 
     def _create_widgets(self):
-        # Main PanedWindow for resizable sections
-        self.paned_window = ttk.PanedWindow(self.master, orient=tk.HORIZONTAL)
-        self.paned_window.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        # Main vertical PanedWindow for top content and log
+        self.main_paned = ttk.PanedWindow(self.master, orient=tk.VERTICAL)
+        self.main_paned.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
 
-        # --- Moved conversion_status_label creation here to ensure it exists early ---
+        # Upper horizontal PanedWindow for left and right panes
+        self.upper_paned = ttk.PanedWindow(self.main_paned, orient=tk.HORIZONTAL)
+        self.main_paned.add(self.upper_paned, weight=3)  # Gives more space to upper section
+
         self.conversion_status_label = ttk.Label(self.master, text="Conversion Status: Initializing...", font=('Arial', 10))
         self.conversion_status_label.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=5)
-        # --- End of moved section ---
 
-        # Left Frame: Client List and Alias
-        self.left_frame = ttk.Frame(self.paned_window)
-        self.paned_window.add(self.left_frame, weight=1)
+        # Left Frame: Client List and Alias - now resizable
+        self.left_frame = ttk.Frame(self.upper_paned)
+        self.upper_paned.add(self.left_frame, weight=1)  # Makes left pane resizable
 
+        # Make client list expand to fill available space
         self.client_list_frame = ttk.LabelFrame(self.left_frame, text="Connected Clients")
         self.client_list_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -104,10 +105,10 @@ class SnapLogServer:
         self.client_listbox.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.client_listbox.bind("<<ListboxSelect>>", self._on_client_select)
 
-        self.refresh_button = ttk.Button(self.client_list_frame, text="Refresh Clients", command=self._refresh_data)
+        self.refresh_button = ttk.Button(self.client_list_frame, text="Refresh Clients", command=self._manual_refresh_data)
         self.refresh_button.pack(pady=5)
 
-        # Alias section
+        # Alias section - stays at bottom of left pane
         self.alias_frame = ttk.LabelFrame(self.left_frame, text="Manage Alias for Selected Client")
         self.alias_frame.pack(fill=tk.X, padx=5, pady=5)
         ttk.Label(self.alias_frame, text="Alias:").grid(row=0, column=0, sticky=tk.W, padx=5, pady=2)
@@ -118,12 +119,11 @@ class SnapLogServer:
         self.save_alias_button.grid(row=1, column=0, columnspan=2, pady=5)
         self.alias_frame.grid_columnconfigure(1, weight=1)
 
+        # Right Frame: Configuration Details & Apply to All & Server Settings - now resizable
+        self.right_frame = ttk.Frame(self.upper_paned)
+        self.upper_paned.add(self.right_frame, weight=2)  # Right pane gets more space
 
-        # Right Frame: Configuration Details & Apply to All & Server Settings
-        self.right_frame = ttk.Frame(self.paned_window)
-        self.paned_window.add(self.right_frame, weight=2)
-
-        # Client Specific Configuration
+        # Make config frame expandable
         self.config_frame = ttk.LabelFrame(self.right_frame, text="Selected Client Configuration")
         self.config_frame.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
@@ -198,21 +198,20 @@ class SnapLogServer:
         self.server_conversion_value_entry.grid(row=2, column=1, sticky=tk.EW, padx=5, pady=2)
 
         self.save_server_button = ttk.Button(self.server_settings_frame, text="Save Server Settings", command=self._save_server_config)
-        self.save_server_button.grid(row=3, column=0, columnspan=2, pady=10) # Adjusted row for new fields
+        self.save_server_button.grid(row=3, column=0, columnspan=2, pady=10)
         self.server_settings_frame.grid_columnconfigure(1, weight=1)
 
         # New: Manual Conversion Button
         self.manual_conversion_button = ttk.Button(self.server_settings_frame, text="Run Conversion Now", command=self._manual_run_conversion)
-        self.manual_conversion_button.grid(row=4, column=0, columnspan=2, pady=5) # Placed below save button
+        self.manual_conversion_button.grid(row=4, column=0, columnspan=2, pady=5)
 
         # Initial state of server conversion value entry
         self._toggle_server_conversion_value_entry()
 
-
-        # Log Display Area
-        self.log_frame = ttk.LabelFrame(self.master, text="Server Log")
-        self.log_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
-        self.log_text_widget = tk.Text(self.log_frame, wrap=tk.WORD, state='disabled', height=10) # Set height for initial view
+        # Log Display Area - now part of the main paned window
+        self.log_frame = ttk.LabelFrame(self.main_paned, text="Server Log")
+        self.main_paned.add(self.log_frame, weight=1)  # Makes it resizable
+        self.log_text_widget = tk.Text(self.log_frame, wrap=tk.WORD, state='disabled', height=15)
         self.log_text_widget.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
         self.log_scrollbar = ttk.Scrollbar(self.log_text_widget, command=self.log_text_widget.yview)
         self.log_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
@@ -220,7 +219,7 @@ class SnapLogServer:
 
         # Initial state of client upload value entry
         self._toggle_upload_value_entry()
-
+        
     def _toggle_upload_value_entry(self):
         """Enables/disables and updates placeholder for individual client upload_value_entry."""
         if self.upload_type_var.get() == "daily":
@@ -542,7 +541,12 @@ class SnapLogServer:
         logger.info("Refreshing client data...")
         self._load_all_client_configs()
         self._populate_client_list()
-        self.master.after(60000, self._refresh_data) # Schedule next refresh
+        self.master.after(60000, self._refresh_data)
+    
+    def _manual_refresh_data(self):
+        logger.info("Refreshing client data...")
+        self._load_all_client_configs()
+        self._populate_client_list()
 
     def _start_conversion_scheduler(self):
         """Starts or restarts the background thread for scheduled conversions."""
